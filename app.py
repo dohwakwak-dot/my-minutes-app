@@ -33,7 +33,7 @@ else:
 
 # 웹 화면 메인 타이틀 꾸미기
 st.title("🏗️ 엔지니어링 맞춤형 스마트 회의록 자동화 시스템")
-st.write("1차 추출된 대화 내용을 눈으로 직접 확인하며 완벽하게 발언자를 매칭합니다.")
+st.write("입력된 참석자 수와 음성 분석 화자 수를 정확히 일치시켜 오차 없는 회의록을 만듭니다.")
 
 # 1단계: 참석자 및 분야별 정보 입력받기
 st.subheader("👥 1단계: 회의 참석자 정보 입력")
@@ -82,17 +82,24 @@ if uploaded_file is not None and member_data:
         # 1차 분석 버튼
         if not st.session_state.step1_done:
             if st.button("🔍 1차 음성 분석 및 발언자 분리 시작"):
-                with st.spinner("재미나이가 음성을 분석하여 목소리 그룹(발언자1, 발언자2...)을 식별하고 있습니다..."):
+                # 현재 사용자가 설정한 참석 인원수 변수 저장
+                target_speaker_count = int(user_count)
+                
+                with st.spinner(f"재미나이가 대화 내용을 분석하여 정확히 {target_speaker_count}개의 발언자 그룹으로 분류하고 있습니다..."):
                     try:
                         audio_bytes = uploaded_file.read()
                         file_ext = uploaded_file.name.split('.')[-1].lower()
                         mime_type = f"audio/{file_ext}" if file_ext in ['mp3', 'wav', 'm4a', 'wma'] else "audio/mp3"
                         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
                         
-                        speaker_prompt = """
-                        위 오디오 파일의 대화 원본을 토대로 녹취록을 작성해라. 
-                        단, 발언자의 실제 이름을 절대 임의로 추측해서 적지 마라. 
-                        목소리 톤과 순서에 따라 철저히 '발언자 1', '발언자 2', '발언자 3' 형태로만 구분하여 '발언자 X: 대화내용' 양식으로 대화록 원본 전체를 출력해라.
+                        # 🛠️ [핵심 변경 사항] AI에게 사용자가 입력한 인원수만큼만 화자를 강제로 일치시키도록 지시
+                        speaker_prompt = f"""
+                        위 오디오 파일의 대화 내용을 면밀히 분석하여 전체 녹취록을 작성해라.
+                        
+                        [🚨 화자 분리 필수 규칙]
+                        - 현재 이 회의에 참여한 실제 사람의 수는 총 {target_speaker_count}명이다.
+                        - 따라서 너는 목소리 톤, 대화 문맥, 발언 내용을 종합 분석하여 전체 대화록의 화자를 정확히 '발언자 1'부터 '발언자 {target_speaker_count}'까지만 분류해야 한다.
+                        - 절대로 '발언자 {target_speaker_count + 1}' 이상의 화자를 임의로 만들어내지 말고, 오직 {target_speaker_count}개의 그룹 안에서 매칭되도록 대화 원본 전체를 '발언자 X: 대화내용' 양식으로 출력해라.
                         """
                         response = client.models.generate_content(
                             model='gemini-2.5-flash',
@@ -100,13 +107,8 @@ if uploaded_file is not None and member_data:
                         )
                         st.session_state.raw_transcript = response.text
                         
-                        # 패턴 추출
-                        finders = re.findall(r'(발언자\s*\d+)', st.session_state.raw_transcript)
-                        st.session_state.detected_speakers = sorted(list(set([f.replace(" ", "") for f in finders])))
-                        
-                        if not st.session_state.detected_speakers:
-                            st.session_state.detected_speakers = ["발언자1", "발언자2", "발언자3", "발언자4"]
-                            
+                        # 강제로 사용자가 지정한 개수만큼의 목록을 UI에 생성
+                        st.session_state.detected_speakers = [f"발언자{x}" for x in range(1, target_speaker_count + 1)]
                         st.session_state.step1_done = True
                         st.rerun()
                     except Exception as e:
@@ -115,20 +117,23 @@ if uploaded_file is not None and member_data:
         # 임시 분석 완료 후 사용자에게 매칭 창을 열어줌
         if st.session_state.step1_done:
             st.subheader("🔄 4단계: 대화 원본 확인 및 발언자 지정")
-            st.success("✅ AI가 음성 대화록을 추출했습니다! 아래 대화 내용을 읽어보시면서, 각 발언자 번호가 실제 누구인지 짝지어 주세요.")
+            st.success(f"✅ AI가 입력하신 {user_count}명의 기준에 맞추어 화자 그룹 분류를 완료했습니다!")
             
             st.write("📋 **1차 추출된 대화 내용 원본 (여기서 대화를 확인하세요):**")
             st.text_area("대화 내용 스크롤 확인창", value=st.session_state.raw_transcript, height=250, disabled=True)
             
-            st.write("🔽 **위 내용을 참고하여 발언자 매칭을 완료해 주세요:**")
+            st.write("🔽 **위 대화 내용을 참고하여 발언자 번호에 맞는 실제 인물을 매칭해 주세요:**")
             
             mapping_results = {}
             cols = st.columns(min(len(st.session_state.detected_speakers), 3))
             for idx, speaker in enumerate(st.session_state.detected_speakers):
                 with cols[idx % 3]:
+                    # 기본 선택 인덱스를 참석자 순서와 매칭되도록 깔끔하게 가이드
+                    default_index = idx if idx < len(member_names_list) else 0
                     mapping_results[speaker] = st.selectbox(
                         f"🔊 {speaker}의 실제 인물",
                         options=member_names_list,
+                        index=default_index,
                         key=f"map_{speaker}"
                     )
             
@@ -141,7 +146,6 @@ if uploaded_file is not None and member_data:
                     mapping_str = "\n".join([f"- 변경 전: {k} -> 변경 후 실제 이름: {v}" for k, v in mapping_results.items()])
                     member_info_str = ", ".join([f"{m['이름']}({m['분야']})" for m in member_data])
                     
-                    # 🛠️ 수정한 프롬프트 구간 (오타 유발 중괄호 처리 및 인쇄 가이드 수정 완료)
                     final_prompt = f"너는 엔지니어링 설계 회사의 베테랑 전문 비서 요원이야. 제공된 데이터와 규칙을 100% 준수하여 보고서용 회의록을 완성해줘.\n\n[제공된 데이터 자료]\n1. 1차 분리된 대화 원본:\n{st.session_state.raw_transcript}\n\n2. 화자 매칭 정보:\n{mapping_str}\n\n3. 전체 인원 및 소속 분야:\n{member_info_str}\n\n4. 회의 사전 메모:\n{memo_input}\n\n[작성 규칙]\n- '발언자 X'를 매칭 정보에 맞게 실제 이름으로 전부 치환해라.\n- 오직 대화 내용과 사전 메모에 명시된 사실로만 요약하고, 기술 제안이나 유추 등 주관적 의견은 절대 포함하지 마라.\n- 샵(#), 별표(**), 대시(---) 같은 마크다운 기호는 전면 금지하며 오직 명사형 종결어미(-함, -임, - 바람)로만 보고서 서식을 작성해라.\n\n[출력 구조]\n1. [회의 개요]\n- 참석자 명단 출력\n2. [주요 안건 및 논의 내용]\n- 안건별 단락을 명확히 나누고 대시(-) 기호로 개조식 요약하되 문장 끝에 실제 발언자 괄호 표기\n3. [결론: 분야별 후속 진행 사항]\n- 상하수도분야, 구조분야, 토질분야, 건축분야, 기계분야, 전기 및 계측제어분야, 인허가 분야, 기타분야, 발주청 리스트를 고려하여 후속 조치 업무 정리\n4. [회의 대화 내용 원본 (녹취록)]\n- 발언자 이름이 모두 한글 이름으로 치환된 전체 대화 원본을 '이름: 대화내용' 양식으로 그대로 출력"
                     
                     try:
