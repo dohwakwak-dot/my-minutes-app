@@ -44,8 +44,8 @@ for i in range(int(user_count)):
     col_name, col_field = st.columns(2)
     with col_name:
         name = st.text_input(f"👤 참석자 {i+1} 이름", key=f"name_{i}", placeholder="홍길동")
-    if field:= st.text_input(f"⚙️ 참석자 {i+1} 담당 분야/직급", key=f"field_{i}", placeholder="예: 상하수도, 구조부, 발주청 감독관 등"):
-        pass
+    with col_field:
+        field = st.text_input(f"⚙️ 참석자 {i+1} 담당 분야/직급", key=f"field_{i}", placeholder="예: 상하수도, 구조부, 발주청 감독관 등")
     if name:
         member_data.append({"이름": name, "분야": field if field else "미지정"})
 
@@ -117,16 +117,12 @@ if uploaded_file is not None and member_data:
             st.subheader("🔄 4단계: 대화 원본 확인 및 발언자 지정")
             st.success("✅ AI가 음성 대화록을 추출했습니다! 아래 대화 내용을 읽어보시면서, 각 발언자 번호가 실제 누구인지 짝지어 주세요.")
             
-            # 💡 [요구사항 적극 반영] 사용자가 읽어볼 수 있도록 1차 대화록 원본을 큰 창으로 상단에 먼저 상시 노출!
             st.write("📋 **1차 추출된 대화 내용 원본 (여기서 대화를 확인하세요):**")
             st.text_area("대화 내용 스크롤 확인창", value=st.session_state.raw_transcript, height=250, disabled=True)
             
             st.write("🔽 **위 내용을 참고하여 발언자 매칭을 완료해 주세요:**")
             
-            # 가로 배치를 이용해 매칭 선택창을 더 깔끔하게 구성
             mapping_results = {}
-            
-            # 발언자 수에 맞춰서 입력란 분할 배치
             cols = st.columns(min(len(st.session_state.detected_speakers), 3))
             for idx, speaker in enumerate(st.session_state.detected_speakers):
                 with cols[idx % 3]:
@@ -145,42 +141,42 @@ if uploaded_file is not None and member_data:
                     mapping_str = "\n".join([f"- 변경 전: {k} -> 변경 후 실제 이름: {v}" for k, v in mapping_results.items()])
                     member_info_str = ", ".join([f"{m['이름']}({m['분야']})" for m in member_data])
                     
-                    final_prompt = f"""
-                    너는 엔지니어링 설계 회사의 베테랑 전문 비서 요원이야.
-                    제공된 데이터와 [🚨 작성 규칙]을 100% 준수하여 한글 파일 보고서용 회의록을 완성해줘.
-
-                    [제공된 데이터 자료]
-                    1. 1차 분리된 대화 원본:
-                    {st.session_state.raw_transcript}
+                    # 🛠️ 수정한 프롬프트 구간 (오타 유발 중괄호 처리 및 인쇄 가이드 수정 완료)
+                    final_prompt = f"너는 엔지니어링 설계 회사의 베테랑 전문 비서 요원이야. 제공된 데이터와 규칙을 100% 준수하여 보고서용 회의록을 완성해줘.\n\n[제공된 데이터 자료]\n1. 1차 분리된 대화 원본:\n{st.session_state.raw_transcript}\n\n2. 화자 매칭 정보:\n{mapping_str}\n\n3. 전체 인원 및 소속 분야:\n{member_info_str}\n\n4. 회의 사전 메모:\n{memo_input}\n\n[작성 규칙]\n- '발언자 X'를 매칭 정보에 맞게 실제 이름으로 전부 치환해라.\n- 오직 대화 내용과 사전 메모에 명시된 사실로만 요약하고, 기술 제안이나 유추 등 주관적 의견은 절대 포함하지 마라.\n- 샵(#), 별표(**), 대시(---) 같은 마크다운 기호는 전면 금지하며 오직 명사형 종결어미(-함, -임, - 바람)로만 보고서 서식을 작성해라.\n\n[출력 구조]\n1. [회의 개요]\n- 참석자 명단 출력\n2. [주요 안건 및 논의 내용]\n- 안건별 단락을 명확히 나누고 대시(-) 기호로 개조식 요약하되 문장 끝에 실제 발언자 괄호 표기\n3. [결론: 분야별 후속 진행 사항]\n- 상하수도분야, 구조분야, 토질분야, 건축분야, 기계분야, 전기 및 계측제어분야, 인허가 분야, 기타분야, 발주청 리스트를 고려하여 후속 조치 업무 정리\n4. [회의 대화 내용 원본 (녹취록)]\n- 발언자 이름이 모두 한글 이름으로 치환된 전체 대화 원본을 '이름: 대화내용' 양식으로 그대로 출력"
                     
-                    2. 작성자가 지정한 정확한 화자 매칭 정보:
-                    {mapping_str}
-                    
-                    3. 전체 인원 및 소속 분야:
-                    {member_info_str}
-                    
-                    4. 작성자가 입력한 회의 사전 메모:
-                    {memo_input}
-
-                    [🚨 작성 규칙 - 사실 입각 및 서식 지정]
-                    1. 1차 대화 원본에서 '발언자 X'로 표기된 부분들을 제공된 '화자 매칭 정보'를 대조하여 실제 이름으로 완전히 치환해라. 
-                    2. 오직 대화 내용하고 사전 메모에 명시된 사실로만 요약해라. 너의 주관적인 의견, 기술 제안, 예측 아이디어는 '절대' 포함하지 마라.
-                    3. 샾(#), 별표(**), 대시(---) 같은 마크다운 기호는 전면 금지한다. 줄바꿈과 공백으로만 가독성을 높여라.
-                    4. 문장 끝은 전문 보고서 어조인 명사형 종결어미(-함, -임, - 바람, - 결정됨)를 사용해라.
-
-                    [📋 출력 양식 구조 가이드]
-                    [회의 개요]
-                    • 참석자 명단: {member_info_str}
-
-                    [주요 안건 및 논의 내용]
-                    (안건별로 명확히 단락을 나누고, 세부 논의는 대시(-) 기호의 개조식으로 요약할 것. 문장 끝에는 바뀐 실제 발언자 이름을 괄호 표기할 것.)
-                    예시: 안건 1. 유입펌프장 관로 설계 변경 건
-                      - 비상시 연계 가능한 관로 설치 반영 완료함 (곽상호)
-
-                    [결론: 분야별 후속 진행 사항]
-                    (회의 결과 이후 조치해야 할 태스크를 아래 필수 고려 부서 및 발주청을 검토하여 분리할 것. 담당자가 매칭되어 있다면 담당자 이름도 함께 적어 가이드할 것.)
-                    ※ 필수 고려 목록: 상하수도분야, 구조분야, 토질분야, 건축분야, 기계분야, 전기 및 계측제어분야, 인허가 분야, 기타분야, 발주청
-                    예시: • [상하수도분야 / 곽상호] 연계 관로 수리계산서 피드백 요청 건 대응 예정
-
-                    [회의 대화 내용 원본 (녹취록)]
-                    (1차 분리된 대화 원본의 '발언자 X'를 실제 매칭된 이름으로
+                    try:
+                        final_response = client.models.generate_content(
+                            model='gemini-2.5-flash',
+                            contents=final_prompt
+                        )
+                        final_minutes = final_response.text
+                        st.success("✅ 완벽하게 매칭된 최종 회의록이 발행되었습니다!")
+                        
+                        st.subheader("📝 최종 회의록 및 매칭 대화록 미리보기")
+                        st.text_area("최종 결과물 창", value=final_minutes, height=400)
+                        
+                        # 파일 빌드
+                        doc = Document()
+                        doc.add_heading('📋 스마트 회의록 결과 보고서', level=0)
+                        doc.add_paragraph(final_minutes)
+                        bio_docx = io.BytesIO()
+                        doc.save(bio_docx)
+                        
+                        bio_hwpx = io.BytesIO()
+                        bio_hwpx.write(final_minutes.encode('utf-8'))
+                        
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1:
+                            st.download_button("💾 워드(Docx) 파일로 다운로드", data=bio_docx.getvalue(), file_name="엔지니어링_최종회의록.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                        with col_dl2:
+                            st.download_button("👑 한글(Hwpx) 파일로 다운로드", data=bio_hwpx.getvalue(), file_name="엔지니어링_최종회의록.hwpx", mime="application/octet-stream")
+                            
+                        if st.button("🔄 처음부터 다시 작성하기"):
+                            st.session_state.step1_done = False
+                            st.rerun()
+                            
+                    except Exception as e:
+                        st.error(f"최종 조율 중 에러 발생: {e}")
+else:
+    st.info("💡 왼쪽 사이드바에 API 키를 넣고, 1~3단계 정보를 채우시면 분석 버튼이 나타납니다.")
+    st.session_state.step1_done = False
