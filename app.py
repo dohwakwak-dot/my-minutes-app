@@ -33,7 +33,7 @@ else:
 
 # 웹 화면 메인 타이틀 꾸미기
 st.title("🏗️ 엔지니어링 맞춤형 스마트 회의록 자동화 시스템")
-st.write("발언자 그룹 매칭 단계를 거쳐 100% 정확한 사실 기반 회의록을 도출합니다.")
+st.write("1차 추출된 대화 내용을 눈으로 직접 확인하며 완벽하게 발언자를 매칭합니다.")
 
 # 1단계: 참석자 및 분야별 정보 입력받기
 st.subheader("👥 1단계: 회의 참석자 정보 입력")
@@ -44,8 +44,8 @@ for i in range(int(user_count)):
     col_name, col_field = st.columns(2)
     with col_name:
         name = st.text_input(f"👤 참석자 {i+1} 이름", key=f"name_{i}", placeholder="홍길동")
-    with col_field:
-        field = st.text_input(f"⚙️ 참석자 {i+1} 담당 분야/직급", key=f"field_{i}", placeholder="예: 상하수도, 구조부, 발주청 감독관 등")
+    if field:= st.text_input(f"⚙️ 참석자 {i+1} 담당 분야/직급", key=f"field_{i}", placeholder="예: 상하수도, 구조부, 발주청 감독관 등"):
+        pass
     if name:
         member_data.append({"이름": name, "분야": field if field else "미지정"})
 
@@ -79,7 +79,7 @@ if uploaded_file is not None and member_data:
     if client is None:
         st.warning("👈 왼쪽 사이드바에 본인의 Gemini API Key를 먼저 입력해 주세요!")
     else:
-        # [변경 프로세스] 최종 작성 전, 임시로 화자를 분리하는 버튼
+        # 1차 분석 버튼
         if not st.session_state.step1_done:
             if st.button("🔍 1차 음성 분석 및 발언자 분리 시작"):
                 with st.spinner("재미나이가 음성을 분석하여 목소리 그룹(발언자1, 발언자2...)을 식별하고 있습니다..."):
@@ -89,7 +89,6 @@ if uploaded_file is not None and member_data:
                         mime_type = f"audio/{file_ext}" if file_ext in ['mp3', 'wav', 'm4a', 'wma'] else "audio/mp3"
                         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
                         
-                        # AI에게 이름을 유추하지 말고 오직 발언자1, 발언자2 형태로 대화 원본만 뽑아내라고 명시
                         speaker_prompt = """
                         위 오디오 파일의 대화 원본을 토대로 녹취록을 작성해라. 
                         단, 발언자의 실제 이름을 절대 임의로 추측해서 적지 마라. 
@@ -101,12 +100,11 @@ if uploaded_file is not None and member_data:
                         )
                         st.session_state.raw_transcript = response.text
                         
-                        # 결과물에서 '발언자 1', '발언자 2' 등의 패턴 추출하기
+                        # 패턴 추출
                         finders = re.findall(r'(발언자\s*\d+)', st.session_state.raw_transcript)
                         st.session_state.detected_speakers = sorted(list(set([f.replace(" ", "") for f in finders])))
                         
                         if not st.session_state.detected_speakers:
-                            # 혹시 한글 인식이 튀었을 경우를 대비한 가상 기본 목록 기본 세팅
                             st.session_state.detected_speakers = ["발언자1", "발언자2", "발언자3", "발언자4"]
                             
                         st.session_state.step1_done = True
@@ -116,19 +114,27 @@ if uploaded_file is not None and member_data:
 
         # 임시 분석 완료 후 사용자에게 매칭 창을 열어줌
         if st.session_state.step1_done:
-            st.subheader("🔄 4단계: 시스템이 감지한 발언자와 실제 참석자 매칭")
-            st.success("✅ AI가 음성 파일 속 목소리 그룹을 분리했습니다! 아래 칸에서 각각 매칭되는 실제 사람을 선택해 주세요.")
+            st.subheader("🔄 4단계: 대화 원본 확인 및 발언자 지정")
+            st.success("✅ AI가 음성 대화록을 추출했습니다! 아래 대화 내용을 읽어보시면서, 각 발언자 번호가 실제 누구인지 짝지어 주세요.")
             
-            # 딕셔너리를 사용하여 동적으로 매칭 창 생성
+            # 💡 [요구사항 적극 반영] 사용자가 읽어볼 수 있도록 1차 대화록 원본을 큰 창으로 상단에 먼저 상시 노출!
+            st.write("📋 **1차 추출된 대화 내용 원본 (여기서 대화를 확인하세요):**")
+            st.text_area("대화 내용 스크롤 확인창", value=st.session_state.raw_transcript, height=250, disabled=True)
+            
+            st.write("🔽 **위 내용을 참고하여 발언자 매칭을 완료해 주세요:**")
+            
+            # 가로 배치를 이용해 매칭 선택창을 더 깔끔하게 구성
             mapping_results = {}
             
-            # 발언자별로 실제 참석자를 고를 수 있는 선택박스 제공
-            for speaker in st.session_state.detected_speakers:
-                mapping_results[speaker] = st.selectbox(
-                    f"🔊 {speaker}는 실제 누구인가요?",
-                    options=member_names_list,
-                    key=f"map_{speaker}"
-                )
+            # 발언자 수에 맞춰서 입력란 분할 배치
+            cols = st.columns(min(len(st.session_state.detected_speakers), 3))
+            for idx, speaker in enumerate(st.session_state.detected_speakers):
+                with cols[idx % 3]:
+                    mapping_results[speaker] = st.selectbox(
+                        f"🔊 {speaker}의 실제 인물",
+                        options=member_names_list,
+                        key=f"map_{speaker}"
+                    )
             
             st.write("---")
             st.subheader("🚀 5단계: 최종 사실 기반 회의록 최종 생성")
@@ -136,7 +142,6 @@ if uploaded_file is not None and member_data:
             if st.button("✨ 최종 회의록 및 한글 파일 발행"):
                 with st.spinner("설정하신 이름 매칭 정보를 바탕으로 최종 완벽한 보고서를 작성 중입니다..."):
                     
-                    # 매칭 데이터를 텍스트로 변환하여 AI에게 주입할 준비
                     mapping_str = "\n".join([f"- 변경 전: {k} -> 변경 후 실제 이름: {v}" for k, v in mapping_results.items()])
                     member_info_str = ", ".join([f"{m['이름']}({m['분야']})" for m in member_data])
                     
@@ -159,7 +164,7 @@ if uploaded_file is not None and member_data:
 
                     [🚨 작성 규칙 - 사실 입각 및 서식 지정]
                     1. 1차 대화 원본에서 '발언자 X'로 표기된 부분들을 제공된 '화자 매칭 정보'를 대조하여 실제 이름으로 완전히 치환해라. 
-                    2. 오직 대화 내용과 사전 메모에 명시된 사실로만 요약해라. AI 너의 주관적인 의견, 기술 제안, 예측 아이디어는 '절대' 포함하지 마라.
+                    2. 오직 대화 내용하고 사전 메모에 명시된 사실로만 요약해라. 너의 주관적인 의견, 기술 제안, 예측 아이디어는 '절대' 포함하지 마라.
                     3. 샾(#), 별표(**), 대시(---) 같은 마크다운 기호는 전면 금지한다. 줄바꿈과 공백으로만 가독성을 높여라.
                     4. 문장 끝은 전문 보고서 어조인 명사형 종결어미(-함, -임, - 바람, - 결정됨)를 사용해라.
 
@@ -178,45 +183,4 @@ if uploaded_file is not None and member_data:
                     예시: • [상하수도분야 / 곽상호] 연계 관로 수리계산서 피드백 요청 건 대응 예정
 
                     [회의 대화 내용 원본 (녹취록)]
-                    (1차 분리된 대화 원본의 '발언자 X'를 실제 매칭된 이름으로 전부 수정한 대화록 전체를 그대로 출력할 것. 양식은 반드시 '이름: 대화내용' 순서로 정렬할 것.)
-                    """
-                    
-                    try:
-                        # 텍스트 컨텍스트만 활용하여 정밀 가공 요청
-                        final_response = client.models.generate_content(
-                            model='gemini-2.5-flash',
-                            contents=final_prompt
-                        )
-                        final_minutes = final_response.text
-                        st.success("✅ 완벽하게 매칭된 최종 회의록이 발행되었습니다!")
-                        
-                        # 최종 결과 미리보기창
-                        st.subheader("📝 최종 회의록 및 매칭 대화록 미리보기")
-                        st.text_area("최종 결과물 창 (복사 가능)", value=final_minutes, height=400)
-                        
-                        # 파일 빌드 및 다운로드
-                        doc = Document()
-                        doc.add_heading('📋 스마트 회의록 결과 보고서', level=0)
-                        doc.add_paragraph(final_minutes)
-                        bio_docx = io.BytesIO()
-                        doc.save(bio_docx)
-                        
-                        bio_hwpx = io.BytesIO()
-                        bio_hwpx.write(final_minutes.encode('utf-8'))
-                        
-                        col_dl1, col_dl2 = st.columns(2)
-                        with col_dl1:
-                            st.download_button("💾 워드(Docx) 파일로 다운로드", data=bio_docx.getvalue(), file_name="엔지니어링_최종회의록.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                        with col_dl2:
-                            st.download_button("👑 한글(Hwpx) 파일로 다운로드", data=bio_hwpx.getvalue(), file_name="엔지니어링_최종회의록.hwpx", mime="application/octet-stream")
-                            
-                        # 새로고침하여 처음부터 다시 할 수 있도록 리셋 버튼 제공
-                        if st.button("🔄 처음부터 다시 작성하기"):
-                            st.session_state.step1_done = False
-                            st.rerun()
-                            
-                    except Exception as e:
-                        st.error(f"최종 조율 중 에러 발생: {e}")
-else:
-    st.info("💡 왼쪽 사이드바에 API 키를 넣고, 1~3단계 정보를 채우시면 분석 버튼이 나타납니다.")
-    st.session_state.step1_done = False
+                    (1차 분리된 대화 원본의 '발언자 X'를 실제 매칭된 이름으로
